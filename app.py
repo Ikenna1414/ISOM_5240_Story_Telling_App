@@ -1,4 +1,4 @@
-"""Streamlit storytelling application.
+"""Streamlit storytelling application for ISOM5240.
 
 The app captions an uploaded image, expands the caption into a child-friendly
 story of 50-100 words, and converts the story to spoken audio.
@@ -20,6 +20,21 @@ CAPTION_MODEL = "Salesforce/blip-image-captioning-base"
 STORY_MODEL = "google/flan-t5-small"
 MIN_STORY_WORDS = 50
 MAX_STORY_WORDS = 100
+PROMPT_LEAK_PHRASES = (
+    "the story must",
+    "return only",
+    "write one",
+    "children aged",
+    "age-appropriate language",
+    "beginning, middle",
+    "frightening details",
+    "rewrite the story",
+)
+CAPTION_STOPWORDS = {
+    "about", "above", "after", "also", "and", "are", "from", "has", "have",
+    "image", "into", "its", "near", "of", "on", "photo", "picture", "shown",
+    "that", "the", "there", "this", "to", "two", "with",
+}
 
 
 st.set_page_config(
@@ -54,6 +69,24 @@ def count_words(text: str) -> int:
     return len(text.split())
 
 
+def caption_keywords(caption: str) -> set[str]:
+    """Return useful caption words for checking image-story relevance."""
+    words = re.findall(r"[a-zA-Z]+", caption.lower())
+    return {word for word in words if len(word) > 3 and word not in CAPTION_STOPWORDS}
+
+
+def is_valid_story(story: str, caption: str) -> bool:
+    """Check length, prompt leakage, and connection to the image caption."""
+    lowered_story = story.lower()
+    if not MIN_STORY_WORDS <= count_words(story) <= MAX_STORY_WORDS:
+        return False
+    if any(phrase in lowered_story for phrase in PROMPT_LEAK_PHRASES):
+        return False
+
+    keywords = caption_keywords(caption)
+    return not keywords or any(keyword in lowered_story for keyword in keywords)
+
+
 def limit_to_100_words(text: str) -> str:
     """Keep a generated story within the assignment's 100-word maximum."""
     words = text.split()
@@ -77,71 +110,58 @@ def caption_image(image: Image.Image) -> str:
 
 def build_story_prompt(caption: str, age_group: str, mood: str) -> str:
     """Create clear generation instructions for the language model."""
-    return f"""
-Write one complete {mood.lower()} story for children aged {age_group}.
-Base it on this image description: {caption}.
-The story must contain 60 to 90 words, use simple age-appropriate language,
-have a clear beginning, middle, and happy ending, and include no violence or
-frightening details. Return only the story, without a title or explanation.
-""".strip()
+    return (
+        f"Create a gentle {mood.lower()} children's tale about: {caption}. "
+        "Use 65 to 85 words. Give a character a name, a simple adventure, "
+        "and a happy ending. Story:"
+    )
+
+
+def create_caption_based_fallback(caption: str) -> str:
+    """Create a safe, image-grounded story if the small model fails."""
+    subject = caption.rstrip(" .")
+    return clean_generated_text(
+        f"One sunny morning, Mia discovered {subject}. She looked closely and "
+        "imagined it was a special message waiting to be understood. With "
+        "patience and creativity, Mia turned every shape, colour, and detail "
+        "into part of a wonderful plan. Her friends gathered around to help. "
+        "Together they completed their project, cheered proudly, and learned "
+        "that even a puzzling picture can inspire a bright new adventure."
+    )
 
 
 def generate_story(caption: str, age_group: str, mood: str) -> str:
     """Generate and, when necessary, revise a story to 50-100 words."""
     storyteller = load_story_pipeline()
-    prompt = build_story_prompt(caption, age_group, mood)
+    prompts = [
+        build_story_prompt(caption, age_group, mood),
+        (
+            f"Tell a 70-word story about {caption}. Start with 'Once upon a "
+            "time'. Include one friendly character and end happily. Story:"
+        ),
+        (
+            f"Turn this scene into a short bedtime adventure: {caption}. "
+            "Write only the tale in 65 to 85 words. Tale:"
+        ),
+    ]
 
-    result = storyteller(
-        prompt,
-        max_new_tokens=140,
-        do_sample=True,
-        temperature=0.85,
-        top_p=0.92,
-        repetition_penalty=1.12,
-    )
-    story = clean_generated_text(result[0]["generated_text"])
-
-    # Give the model up to two opportunities to meet the required word range.
-    for _ in range(2):
-        word_count = count_words(story)
-        if MIN_STORY_WORDS <= word_count <= MAX_STORY_WORDS:
-            return story
-
-        revision_prompt = f"""
-Rewrite the story below as one complete, gentle story of 60 to 90 words for
-children aged {age_group}. Keep the same characters, use simple language, and
-end happily. Return only the rewritten story.
-
-Story: {story}
-""".strip()
+    # Try three concise prompts and reject instructions masquerading as a story.
+    for prompt in prompts:
         result = storyteller(
-            revision_prompt,
-            max_new_tokens=140,
-            do_sample=True,
-            temperature=0.8,
-            top_p=0.92,
-            repetition_penalty=1.12,
+            prompt,
+            max_new_tokens=120,
+            do_sample=False,
+            num_beams=4,
+            no_repeat_ngram_size=3,
+            repetition_penalty=1.15,
         )
         story = clean_generated_text(result[0]["generated_text"])
+        story = limit_to_100_words(story)
+        if is_valid_story(story, caption):
+            return story
 
-    # A deterministic fallback guarantees compliance if the small model is terse.
-    if count_words(story) < MIN_STORY_WORDS:
-        ending = (
-            " Together, the new friends followed their curiosity, helped one "
-            "another, and discovered that kindness can turn an ordinary day "
-            "into a wonderful adventure. When it was time to go home, everyone "
-            "smiled and promised to remember the happy moment."
-        )
-        story = clean_generated_text(story + ending)
-
-    if count_words(story) < MIN_STORY_WORDS:
-        story = clean_generated_text(
-            story
-            + " From that day on, they looked for small ways to share joy "
-            "wherever they went."
-        )
-
-    return limit_to_100_words(story)
+    # Guarantee a relevant 50-100-word result when the lightweight model fails.
+    return limit_to_100_words(create_caption_based_fallback(caption))
 
 
 def story_to_audio(story: str) -> bytes:
