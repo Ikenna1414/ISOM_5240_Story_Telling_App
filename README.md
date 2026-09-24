@@ -1,7 +1,6 @@
 # Picture Story Studio
 
-Picture Story Studio is a child-friendly Streamlit application created for the
-ISOM5240 individual assignment. It accepts an uploaded image, generates an
+Picture Story Studio is a child-friendly Streamlit application. It accepts an uploaded image, generates an
 image caption with a Hugging Face pipeline, expands the caption into a 50-100
 word story, and converts the story into playable MP3 narration.
 
