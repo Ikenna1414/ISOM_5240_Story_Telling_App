@@ -1,0 +1,7 @@
+streamlit==1.59.0
+transformers==4.55.1
+torch>=2.2,<3.0
+Pillow>=11.0,<13.0
+gTTS==2.5.4
+sentencepiece>=0.2,<1.0
+safetensors>=0.4,<1.0
