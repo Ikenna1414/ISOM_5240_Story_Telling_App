@@ -1,4 +1,4 @@
-"""Streamlit storytelling application for ISOM5240.
+"""Streamlit storytelling application.
 
 The app captions an uploaded image, expands the caption into a child-friendly
 story of 50-100 words, and converts the story to spoken audio.
