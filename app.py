@@ -1,4 +1,4 @@
-"""Image storytelling application for the ISOM5240 assignment."""
+"""Image storytelling application."""
 
 from io import BytesIO
 
