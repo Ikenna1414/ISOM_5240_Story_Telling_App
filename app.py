@@ -1,4 +1,4 @@
-"""Image storytelling application."""
+"""Image storytelling application for the ISOM5240 assignment."""
 
 from io import BytesIO
 
@@ -90,6 +90,8 @@ def generate_story(caption):
         max_new_tokens=120,
         do_sample=False,
         num_beams=4,
+        no_repeat_ngram_size=3,
+        repetition_penalty=1.5,
     )
 
     story = result[0]["generated_text"].strip()
@@ -103,13 +105,25 @@ def generate_story(caption):
         or "60 to 90 words" in story.lower()
     )
 
-    if count_words(story) < 50 or instruction_repeated:
+    if count_words(story) < 50 or instruction_repeated or is_repetitive(story):
         story = create_fallback_story(caption)
 
     if count_words(story) > 100:
         story = shorten_story(story)
 
     return story
+
+
+def is_repetitive(story):
+    """Check whether the opening phrase is repeated in the story."""
+
+    words = story.lower().split()
+
+    if len(words) < 16:
+        return False
+
+    opening_phrase = " ".join(words[:8])
+    return story.lower().count(opening_phrase) > 1
 
 
 def create_fallback_story(caption):
